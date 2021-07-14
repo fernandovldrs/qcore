@@ -24,10 +24,8 @@ class Experiment:
         self.wait_time = wait_time
 
         # Sweep configurations
-        self.sweep_config = {"x": x_sweep, "y": y_sweep}
-        self.is_sweep_explicit = {"x": is_x_explicit, "y": is_y_explicit}
-        self.y_sweep = y_sweep
-        self.is_y_explicit = is_y_explicit
+        self.sweep_config = {"n": (0, self.reps, 1), "x": x_sweep, "y": y_sweep}
+        self.is_sweep_explicit = {"n": False, "x": is_x_explicit, "y": is_y_explicit}
 
         # QUA variable definitions {name:type}
         self.QUA_var_list = {
@@ -37,7 +35,9 @@ class Experiment:
             "I": fixed,
             "Q": fixed,
         }
-        # TODO add extra variables here
+
+        # List of variables to be sent to streams. More can be added in _check_sweeps
+        self.QUA_stream_list = ['I', 'Q']
 
         # Set attributes for QUA variables (specified in QUA_variable_declaration)
         for var_name in self.QUA_var_list.keys():
@@ -88,25 +88,31 @@ class Experiment:
 
         return
 
-    def QUA_sweep(self, QUA_function, sweep_dim):
+    def QUA_sweep(self, sweep_dim, QUA_function):
 
-        # Check whether the sweep is configured
-        if self.sweep_config[sweep_dim] == None:
+        # Get sweep variable
+        sweep_var = getattr(self, sweep_dim)
+
+        if sweep_var == None:
+            # If sweep is not configured, simply play function 
             QUA_function()
 
         else:
             # Check the type of the loop
             if self.is_sweep_explicit[sweep_dim]:
                 # Wrap function in qua.for_ loop
-                with for_(self.n, 0, self.n < self.reps, self.n + 1):
+                start, stop, step = self.sweep_config[sweep_dim]
+                with for_(sweep_var, start, sweep_var < stop + step/2, sweep_var + step):
                     QUA_function()
             else:
+                # Get array of values to sweep over
+                loop_array = self.sweep_config[sweep_dim]
                 # Wrap function in qua.for_all_ loop
-                with for_all_(self.n, 0, self.n < self.reps, self.n + 1):
+                with for_all_(sweep_var, loop_array):
                     QUA_function()
 
     @abstractmethod
-    def QUA_pulse_sequence(self):
+    def QUA_play_pulse_sequence(self):
         """
         Macro that defines the QUA pulse sequence inside the experiment loop. It is
         specified by the experiment (spectroscopy, power rabi, etc.) in the child class.
@@ -128,13 +134,15 @@ class Experiment:
             self.QUA_stream_declaration()
 
             # Experiment loop
-            with for_(self.n, 0, self.n < self.reps, self.n + 1):
-                with for_(
-                    self.x, self.x_start, self.x < self.x_stop, self.x + self.x_step
-                ):
-                    self.QUA_pulse_sequence()
-                    self.QUA_save_results_to_stream()
+            self.QUA_sweep(
+                "n", self.QUA_sweep(
+                    "x", self.QUA_sweep(
+                        "y", self.QUA_play_pulse_sequence()
+                    )
+                )
+            )
 
+            # Define stream processing
             self.QUA_stream_processing()
 
         return qua_sequence
@@ -150,12 +158,12 @@ class Experiment:
 
     def QUA_stream_declaration(self):
         """
-        Macro that calls QUA stream declaration statements. Streams must be defined
-        as attributes to be accessed in other methods.
+        Macro that calls QUA stream declaration statements. The variables are
+        specified in QUA_stream_list.
         """
-        self.x_stream = declare_stream()  # to save "x"
-        self.I_stream = declare_stream()  # to save "I"
-        self.Q_stream = declare_stream()  # to save "Q"
+        for key, val in self.QUA_stream_list:
+            if val:
+                setattr(self, key, declare_stream())
 
     def QUA_save_results_to_stream(self):
         """

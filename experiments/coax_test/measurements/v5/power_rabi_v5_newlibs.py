@@ -27,7 +27,7 @@ class PowerRabi(Experiment):
         # Passes remaining parameters to parent
         super().__init__(**other_params)
 
-    def QUA_pulse_sequence(self):
+    def QUA_play_pulse_sequence(self):
         """
         Defines pulse sequence to be played inside the experiment loop
         """
@@ -36,6 +36,7 @@ class PowerRabi(Experiment):
         align(self.qubit.name, self.rr.name)
         self.rr.measure(self.readout_op)  # This should account for intW
         wait(int(self.wait_time // 4), self.qubit.name)
+        self.QUA_save_results_to_stream()
         """
         play(self.qubit_op * amp(self.x), "qubit")
         align("qubit", "rr")
@@ -47,6 +48,9 @@ class PowerRabi(Experiment):
             demod.full("integW2", self.Q),
         )
         wait(int(self.wait_time // 4), "qubit")
+        save(self.x, self.x_stream)
+        save(self.I, self.I_stream)
+        save(self.Q, self.Q_stream)
 
 
 # -------------------------------- Execution -----------------------------------
